@@ -1,4 +1,5 @@
-from boto.s3.connection import S3Connection
+from boto.exception import S3CreateError
+from boto.s3.connection import S3Connection, Location
 from boto.s3.key import Key
 from django.core.exceptions import ImproperlyConfigured
 from mediasync.core import TYPES_TO_COMPRESS
@@ -17,6 +18,7 @@ class Client(BaseClient):
         self.aws_bucket = msettings['AWS_BUCKET']
         self.aws_prefix = msettings.get('AWS_PREFIX', '').strip('/')
         self.aws_bucket_cname =  msettings.get('AWS_BUCKET_CNAME', False)
+        self.aws_location = msettings.get('AWS_LOCATION', Location.DEFAULT)
 
         assert self.aws_bucket
 
@@ -35,9 +37,12 @@ class Client(BaseClient):
             self._conn = S3Connection(key, secret)
         except AttributeError:
             raise ImproperlyConfigured("S3 keys not set and no boto config found.")
-
         if self._create_bucket:
-            self._bucket = self._conn.create_bucket(self.aws_bucket)
+            try:
+                self._bucket = self._conn.create_bucket(self.aws_bucket,
+                                                        location=self.aws_location)
+            except S3CreateError:
+                self._bucket = self._conn.get_bucket(self.aws_bucket, validate=False)
         else:
             self._bucket = self._conn.get_bucket(self.aws_bucket, validate=False)
 
@@ -55,7 +60,7 @@ class Client(BaseClient):
           with_ssl: (bool) If True, return an HTTPS url.
         """
         protocol = 'http' if with_ssl is False else 'https'
-        url = (self.aws_bucket_cname and "%s://%s" or "%s://s3.amazonaws.com/%s") % (protocol, self.aws_bucket)
+        url = (self.aws_bucket_cname and "%s://%s" or "%s://%s.s3.amazonaws.com") % (protocol, self.aws_bucket)
         if self.aws_prefix:
             url = "%s/%s" % (url, self.aws_prefix)
         return url
